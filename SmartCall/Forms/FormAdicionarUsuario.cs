@@ -7,7 +7,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using SmartCall.Models; 
+using SmartCall.Models;
+using SmartCall.Models.DTOs;
+using SmartCall.Services;
 using System.Linq;
 
 namespace SmartCall.Forms
@@ -19,7 +21,7 @@ namespace SmartCall.Forms
             InitializeComponent();
         }
 
-        private void btnSalvar_Click(object sender, EventArgs e)
+        private async void btnSalvar_Click(object sender, EventArgs e)
         {
             string nome = txtNome.Text.Trim();
             string email = txtEmail.Text.Trim();
@@ -40,55 +42,68 @@ namespace SmartCall.Forms
 
             try
             {
-                using (var db = new MeuProjetoDbContext())
+                // Desabilita o botão durante o processo
+                btnSalvar.Enabled = false;
+
+                // Criar requisição para a API
+                var request = new RegisterRequest
                 {
-                    if (db.Usuarios.Any(u => u.Email.ToLower() == email.ToLower()))
+                    FullName = nome,
+                    Email = email,
+                    Password = senha,
+                    ConfirmPassword = senha  // Usar a mesma senha para confirmação
+                };
+
+                // Fazer requisição para criar usuário
+                var response = await ApiService.PostAsync<LoginResponse>("auth/register", request);
+
+                if (response == null)
+                {
+                    MessageBox.Show("Erro ao conectar com o servidor.", "Erro de Conexão", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    btnSalvar.Enabled = true;
+                    return;
+                }
+
+                if (!response.Success)
+                {
+                    string errorMsg = response.Message ?? "Erro ao cadastrar usuário";
+                    if (response.Errors != null && response.Errors.Count > 0)
                     {
-                        MessageBox.Show("Este e-mail já está cadastrado.", "E-mail Duplicado", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return;
+                        errorMsg += "\n" + string.Join("\n", response.Errors);
                     }
+                    MessageBox.Show(errorMsg, "Erro ao Cadastrar", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    btnSalvar.Enabled = true;
+                    return;
+                }
 
-                    string senhaHash = BCrypt.Net.BCrypt.HashPassword(senha);
-
-
-                    int cargoValor;
-                    switch (cargoString)
+                // Se o usuário foi criado com sucesso, atualizar o cargo se necessário
+                if (cargoString != "Usuário" && !string.IsNullOrEmpty(response.User?.Id))
+                {
+                    var updateRequest = new UpdateUserRequest
                     {
-                        case "Técnico":
-                            cargoValor = 1;
-                            break;
-                        case "Administrador":
-                            cargoValor = 2;
-                            break;
-                        default:
-                            cargoValor = 0;
-                            break;
-                    }
-
-                    var novoUsuario = new Usuario
-                    {
-                        NomeCompleto = nome,
                         Email = email,
-                        SenhaHash = senhaHash,
-                        Cargo = cargoValor
+                        FullName = nome,
+                        Role = cargoString
                     };
 
-
-                    db.Usuarios.Add(novoUsuario);
-                    db.SaveChanges();
-
-                    MessageBox.Show("Usuário cadastrado com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-
-                    txtNome.Clear();
-                    txtEmail.Clear();
-                    txtSenha.Clear();
-                    cmbCargo.SelectedIndex = 0;
+                    await ApiService.PutAsync<ApiResponse>($"users/{response.User.Id}", updateRequest);
                 }
+
+                MessageBox.Show("Usuário cadastrado com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                // Limpar campos
+                txtNome.Clear();
+                txtEmail.Clear();
+                txtSenha.Clear();
+                cmbCargo.SelectedIndex = 0;
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Erro ao salvar usuário: " + ex.Message, "Erro de Banco de Dados", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Erro ao salvar usuário: " + ex.Message, "Erro de Conexão", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                btnSalvar.Enabled = true;
             }
         }
 

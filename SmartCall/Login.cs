@@ -1,6 +1,8 @@
 using BCrypt.Net;
 using SmartCall.Forms;
 using SmartCall.Models;
+using SmartCall.Models.DTOs;
+using SmartCall.Services;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -48,12 +50,12 @@ namespace SmartCall
 
         private void Formulario_MouseDown_Para_Arrastar(object sender, MouseEventArgs e)
         {
-            // Verifica se foi o botão esquerdo do mouse
+            // Verifica se foi o botï¿½o esquerdo do mouse
             if (e.Button == MouseButtons.Left)
             {
                 ReleaseCapture(); // Libera a captura do mouse
-                                  // Envia a mensagem para o Windows de que o botão esquerdo foi pressionado
-                                  // na "barra de título" (HT_CAPTION)
+                                  // Envia a mensagem para o Windows de que o botï¿½o esquerdo foi pressionado
+                                  // na "barra de tï¿½tulo" (HT_CAPTION)
                 SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
             }
         }
@@ -68,77 +70,60 @@ namespace SmartCall
             F_LB_TT();
         }
 
-        private bool ValidarLogin()
+        private async Task<bool> ValidarLoginAsync()
         {
             // 1. Pegue os dados dos TextBoxes (com .Trim())
-            string usuario = txtUsuario.Text.Trim(); // <<< MUDE AQUI (seu TextBox de email/usuario)
-            string senha = txtSenha.Text.Trim();     // <<< MUDE AQUI (seu TextBox de senha)
+            string usuario = txtUsuario.Text.Trim();
+            string senha = txtSenha.Text.Trim();
 
             if (string.IsNullOrWhiteSpace(usuario) || string.IsNullOrWhiteSpace(senha))
             {
-                MessageBox.Show("Por favor, preencha o usuário e a senha.", "Campos Vazios", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Por favor, preencha o usuÃ¡rio e a senha.", "Campos Vazios", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
 
             try
             {
-                // 2. Conecte ao banco usando o Contexto do EF
-                using (var db = new MeuProjetoDbContext())
+                // 2. Fazer login via API
+                var loginRequest = new LoginRequest
                 {
-                    // 3. PRIMEIRO: Encontre o usuário APENAS pelo email
-                    //    (Usando .ToLower() para garantir)
-                    var usuarioDoBanco = db.Usuarios
-                        .FirstOrDefault(u => u.Email.ToLower() == usuario.ToLower());
+                    Email = usuario,
+                    Password = senha
+                };
 
-                    // 4. Verifique se o usuário existe
-                    if (usuarioDoBanco == null)
-                    {
-                        // Não encontrou o usuário (Email errado)
-                        MessageBox.Show("Usuário ou senha incorretos.", "Falha no Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return false;
-                    }
+                var response = await ApiService.PostAsync<LoginResponse>("auth/login", loginRequest);
 
-                    // 5. SEGUNDO: Verifique a senha usando BCrypt.Verify
-                    //    Isso compara a "senha" (texto puro) com o "usuarioDoBanco.SenhaHash" (o hash $2a$...)
-
-                    bool senhaCorreta;
-                    try
-                    {
-                        // A classe se chama "BCrypt" e o método "Verify"
-                        senhaCorreta = BCrypt.Net.BCrypt.Verify(senha, usuarioDoBanco.SenhaHash);
-                    }
-                    catch (Exception ex)
-                    {
-                        // Isso pode falhar se a senha no banco estiver em formato inválido
-                        MessageBox.Show("Erro ao verificar o hash da senha: " + ex.Message, "Erro de Hash", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return false;
-                    }
-
-
-                    if (!senhaCorreta)
-                    {
-                        // Senha errada
-                        MessageBox.Show("Usuário ou senha incorretos.", "Falha no Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return false;
-                    }
-
-                    // 6. TERCEIRO: Verifique o Cargo (ex: 2 = Admin)
-                    if (usuarioDoBanco.Cargo == 2)
-                    {
-                        return true; // SUCESSO! É admin e a senha está correta.
-                    }
-                    else
-                    {
-                        // Não é admin
-                        MessageBox.Show("Você não tem permissão de Administrador para acessar.", "Acesso Negado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return false;
-                    }
+                if (response == null)
+                {
+                    MessageBox.Show("Erro ao conectar com o servidor.", "Erro de ConexÃ£o", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return false;
                 }
+
+                if (!response.Success)
+                {
+                    MessageBox.Show(response.Message ?? "UsuÃ¡rio ou senha incorretos.", "Falha no Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return false;
+                }
+
+                // 3. Verificar se Ã© Administrador
+                if (response.User?.Role != "Administrador")
+                {
+                    MessageBox.Show("VocÃª nÃ£o tem permissÃ£o de Administrador para acessar.", "Acesso Negado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+
+                // 4. Salvar o token para requisiÃ§Ãµes futuras
+                if (!string.IsNullOrEmpty(response.Token))
+                {
+                    ApiService.SetToken(response.Token);
+                }
+
+                return true; // SUCESSO!
             }
             catch (Exception ex)
             {
-                // Mostra qualquer erro de conexão ou de consulta
-                MessageBox.Show("Erro ao conectar ao banco de dados: " + ex.Message, "Erro de Conexão", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // Mostra qualquer erro de conexÃ£o ou de consulta
+                MessageBox.Show("Erro ao conectar com o servidor: " + ex.Message, "Erro de ConexÃ£o", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
         }
@@ -163,11 +148,14 @@ namespace SmartCall
 
         }
 
-        private void BT_Tasks_Click(object sender, EventArgs e)
+        private async void BT_Tasks_Click(object sender, EventArgs e)
         {
             if (BT_Tasks.Text == "Login")
             {
-                if (ValidarLogin())
+                // Desabilitar botÃ£o durante o login
+                BT_Tasks.Enabled = false;
+                
+                if (await ValidarLoginAsync())
                 {
                     Scala1 = true;
                     Update2.Enabled = true;
@@ -175,14 +163,15 @@ namespace SmartCall
                 }
                 else
                 {
-                    // Falha no login ou permissão. A função ValidarLogin()
-                    // já exibiu a mensagem de erro específica.
+                    // Falha no login ou permissÃ£o. A funÃ§Ã£o ValidarLoginAsync()
+                    // jÃ¡ exibiu a mensagem de erro especÃ­fica.
+                    BT_Tasks.Enabled = true;
                 }
             }
             else
             {
-                // Aqui você pode adicionar a lógica para "Atualizar", "Deletar", "Adicionar"
-                // quando implementar essas funções.
+                // Aqui vocÃª pode adicionar a lÃ³gica para "Atualizar", "Deletar", "Adicionar"
+                // quando implementar essas funÃ§Ãµes.
                 // Por exemplo:
                 // if (BT_Tasks.Text == "Adicionar") { ... }
             }
@@ -197,31 +186,31 @@ namespace SmartCall
 
         private void pictureBox5_Click(object sender, EventArgs e)
         {
-            LB_TT.Text = "Usuário";
+            LB_TT.Text = "Usuï¿½rio";
             AbrirFormularioFilho(new FormVerUsuarios());
         }
 
         private void label8_Click(object sender, EventArgs e)
         {
-            LB_TT.Text = "Novo Usuário";
+            LB_TT.Text = "Novo Usuï¿½rio";
             AbrirFormularioFilho(new FormAdicionarUsuario());
         }
 
         private void pictureBox7_Click(object sender, EventArgs e)
         {
-            LB_TT.Text = " Editar Usuário";
+            LB_TT.Text = " Editar Usuï¿½rio";
             AbrirFormularioFilho(new FormEditarUsuario());
         }
 
         private void pictureBox8_Click(object sender, EventArgs e)
         {
-            LB_TT.Text = "Eliminar Usuário";
+            LB_TT.Text = "Eliminar Usuï¿½rio";
             AbrirFormularioFilho(new FormDeletarUsuario());
         }
 
         private void pictureBox6_Click_1(object sender, EventArgs e)
         {
-            LB_TT.Text = "Novo Usuário";
+            LB_TT.Text = "Novo Usuï¿½rio";
             AbrirFormularioFilho(new FormAdicionarUsuario());
         }
 
@@ -236,22 +225,22 @@ namespace SmartCall
                     BT_Tasks.Text = "Logar";
                     break;
 
-                case " Editar Usuário":
+                case " Editar Usuï¿½rio":
                     BT_Tasks.Hide();
                     BT_Tasks.Text = "";
                     break;
 
-                case "Eliminar Usuário":
+                case "Eliminar Usuï¿½rio":
                     BT_Tasks.Hide();
                     BT_Tasks.Text = "";
                     break;
 
-                case "Novo Usuário":
+                case "Novo Usuï¿½rio":
                     BT_Tasks.Hide();
                     BT_Tasks.Text = "";
                     break;
 
-                case "Usuário":
+                case "Usuï¿½rio":
                     BT_Tasks.Hide();
                     BT_Tasks.Text = "";
                     break;
@@ -278,7 +267,7 @@ namespace SmartCall
                     Scala1 = false;
                     Update2.Enabled = false;
                     Update2.Start();
-                    LB_TT.Text = "Usuário";
+                    LB_TT.Text = "Usuï¿½rio";
                     LB_TT.Hide();
                 }
             }
@@ -309,7 +298,7 @@ namespace SmartCall
                     Scala2 = false;
                     Update2.Enabled = false;
                     Update2.Start();
-                    LB_TT.Text = "Usuário";
+                    LB_TT.Text = "Usuï¿½rio";
                     LB_TT.Hide();
                 }
             }
@@ -350,19 +339,19 @@ namespace SmartCall
 
         private void label7_Click(object sender, EventArgs e)
         {
-            LB_TT.Text = "Usuário";
+            LB_TT.Text = "Usuï¿½rio";
             AbrirFormularioFilho(new FormVerUsuarios());
         }
 
         private void label10_Click(object sender, EventArgs e)
         {
-            LB_TT.Text = "Eliminar Usuário";
+            LB_TT.Text = "Eliminar Usuï¿½rio";
             AbrirFormularioFilho(new FormDeletarUsuario());
         }
 
         private void label9_Click(object sender, EventArgs e)
         {
-            LB_TT.Text = " Editar Usuário";
+            LB_TT.Text = " Editar Usuï¿½rio";
             AbrirFormularioFilho(new FormEditarUsuario());
         }
 
@@ -371,8 +360,8 @@ namespace SmartCall
             // Mensagem do Windows: WM_NCHITTEST (Enviada quando o mouse se move)
             const int WM_NCHITTEST = 0x84;
 
-            // Resultados do Hit Test (onde o mouse está)
-            const int HTCLIENT = 1;     // Na área "cliente" (normal)
+            // Resultados do Hit Test (onde o mouse estï¿½)
+            const int HTCLIENT = 1;     // Na ï¿½rea "cliente" (normal)
             const int HTLEFT = 10;      // Borda esquerda
             const int HTRIGHT = 11;     // Borda direita
             const int HTTOP = 12;       // Borda superior
@@ -386,15 +375,15 @@ namespace SmartCall
 
             if (m.Msg == WM_NCHITTEST && (int)m.Result == HTCLIENT)
             {
-                // Obtém as coordenadas do mouse em relação à tela
+                // Obtï¿½m as coordenadas do mouse em relaï¿½ï¿½o ï¿½ tela
                 Point screenPoint = new Point(m.LParam.ToInt32());
-                // Converte para coordenadas em relação ao formulário
+                // Converte para coordenadas em relaï¿½ï¿½o ao formulï¿½rio
                 Point clientPoint = this.PointToClient(screenPoint);
 
                 // Define a "largura" da borda para redimensionar (ex: 10 pixels)
                 int gripSize = 10;
 
-                // Lógica para os 4 cantos
+                // Lï¿½gica para os 4 cantos
                 if (clientPoint.X <= gripSize && clientPoint.Y <= gripSize)
                     m.Result = (IntPtr)HTTOPLEFT;
                 else if (clientPoint.X >= this.ClientSize.Width - gripSize && clientPoint.Y <= gripSize)
@@ -403,7 +392,7 @@ namespace SmartCall
                     m.Result = (IntPtr)HTBOTTOMLEFT;
                 else if (clientPoint.X >= this.ClientSize.Width - gripSize && clientPoint.Y >= this.ClientSize.Height - gripSize)
                     m.Result = (IntPtr)HTBOTTOMRIGHT;
-                // Lógica para as 4 bordas
+                // Lï¿½gica para as 4 bordas
                 else if (clientPoint.X <= gripSize)
                     m.Result = (IntPtr)HTLEFT;
                 else if (clientPoint.X >= this.ClientSize.Width - gripSize)

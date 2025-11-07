@@ -8,6 +8,8 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using SmartCall.Models; // <-- ADICIONE ESTE (para o DbContext e Usuario)
+using SmartCall.Models.DTOs;
+using SmartCall.Services;
 using System.Linq;      // <-- ADICIONE ESTE (para .Select() e .ToList())
 
 namespace SmartCall.Forms
@@ -19,33 +21,40 @@ namespace SmartCall.Forms
             InitializeComponent();
         }
 
-        public void CarregarUsuarios()
+        public async Task CarregarUsuariosAsync()
         {
             try
             {
-                using (var db = new MeuProjetoDbContext())
+                // Busca usuários da API
+                var usuarios = await ApiService.GetAsync<List<UserListResponse>>("users");
+
+                if (usuarios == null || usuarios.Count == 0)
                 {
-                    var listaParaExibir = db.Usuarios
-                        .Select(u => new
-                        {
-                            ID = u.Id,
-                            Nome = u.NomeCompleto,
-                            Email = u.Email,
-                            Cargo = (u.Cargo == 2) ? "Administrador" :
-                            (u.Cargo == 1) ? "Técnico" :
-                                             "Usuário"
-                        })
-                        .ToList();
+                    MessageBox.Show("Nenhum usuário encontrado.",
+                                    "Informação",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Information);
+                    dgvUsuarios.DataSource = null;
+                    return;
+                }
 
-                    dgvUsuarios.DataSource = listaParaExibir;
+                // Preparar dados para exibição
+                var listaParaExibir = usuarios.Select(u => new
+                {
+                    ID = u.Id,
+                    Nome = u.FullName,
+                    Email = u.Email,
+                    Cargo = u.Role
+                }).ToList();
 
-                    if (dgvUsuarios.Columns.Count > 0)
-                    {
-                        dgvUsuarios.Columns["ID"].HeaderText = "ID";
-                        dgvUsuarios.Columns["Nome"].HeaderText = "Nome Completo";
-                        dgvUsuarios.Columns["Email"].HeaderText = "E-mail";
-                        dgvUsuarios.Columns["Cargo"].HeaderText = "Nível de Acesso";
-                    }
+                dgvUsuarios.DataSource = listaParaExibir;
+
+                if (dgvUsuarios.Columns.Count > 0)
+                {
+                    dgvUsuarios.Columns["ID"].HeaderText = "ID";
+                    dgvUsuarios.Columns["Nome"].HeaderText = "Nome Completo";
+                    dgvUsuarios.Columns["Email"].HeaderText = "E-mail";
+                    dgvUsuarios.Columns["Cargo"].HeaderText = "Nível de Acesso";
                 }
             }
             catch (Exception ex)
@@ -57,11 +66,9 @@ namespace SmartCall.Forms
             }
         }
 
-        private void FormVerUsuarios_Load_1(object sender, EventArgs e)
+        private async void FormVerUsuarios_Load_1(object sender, EventArgs e)
         {
-            {
-                CarregarUsuarios();
-            }
+            await CarregarUsuariosAsync();
         }
     }
 }
